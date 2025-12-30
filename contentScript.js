@@ -50,9 +50,22 @@ const DEFAULT_SETTINGS = {
 
 let settings = { ...DEFAULT_SETTINGS };
 const envType = window.location.hostname.toLowerCase().includes("admin") ? "ADMIN" : "H5";
+let extensionAlive = true;
+
+function isExtensionAvailable() {
+  if (!extensionAlive) {
+    return false;
+  }
+  try {
+    return Boolean(chrome?.runtime?.id);
+  } catch (error) {
+    extensionAlive = false;
+    return false;
+  }
+}
 
 function safeSendMessage(payload) {
-  if (!chrome?.runtime?.id) {
+  if (!isExtensionAvailable()) {
     return;
   }
   try {
@@ -61,6 +74,7 @@ function safeSendMessage(payload) {
     });
   } catch (error) {
     // Extension context invalidated (e.g., reload/uninstall).
+    extensionAlive = false;
   }
 }
 
@@ -78,18 +92,33 @@ function postSettingsToPage() {
 }
 
 function injectPageHook() {
+  if (!isExtensionAvailable()) {
+    return;
+  }
   const script = document.createElement("script");
-  script.src = chrome.runtime.getURL("pageHook.js");
+  try {
+    script.src = chrome.runtime.getURL("pageHook.js");
+  } catch (error) {
+    extensionAlive = false;
+    return;
+  }
   script.async = false;
   (document.head || document.documentElement).appendChild(script);
   script.onload = () => script.remove();
 }
 
 function loadSettings() {
-  chrome.storage.sync.get(DEFAULT_SETTINGS, (items) => {
-    settings = { ...settings, ...items };
-    postSettingsToPage();
-  });
+  if (!isExtensionAvailable()) {
+    return;
+  }
+  try {
+    chrome.storage.sync.get(DEFAULT_SETTINGS, (items) => {
+      settings = { ...settings, ...items };
+      postSettingsToPage();
+    });
+  } catch (error) {
+    extensionAlive = false;
+  }
 }
 
 function escapeRegex(value) {
@@ -174,95 +203,113 @@ function normalizePayload(input) {
 }
 
 function handleRequestMessage(payload) {
-  if (!settings.enabled) {
-    return;
-  }
-  const fullUrl = payload.url;
-  if (!fullUrl) {
-    return;
-  }
-  const path = buildPath(fullUrl);
-  if (isBlocked(path)) {
-    return;
-  }
-
-  const snapshot = {
-    id: crypto.randomUUID(),
-    ts: payload.ts || Date.now(),
-    envType,
-    method: payload.method,
-    fullUrl,
-    path,
-    status: payload.status
-  };
-
-  if (envType === "ADMIN") {
-    const requestText = normalizePayload(payload.requestBody);
-    const requestLimited = limitText(requestText || "");
-    if (requestLimited.text !== null && requestLimited.text !== "") {
-      const requestParsed = requestLimited.truncated
-        ? { type: "TEXT", value: requestLimited.text }
-        : parsePayload(requestLimited.text);
-      snapshot.requestPayloadType = requestParsed.type;
-      snapshot.requestPayload = requestParsed.value;
+  try {
+    if (!settings.enabled) {
+      return;
+    }
+    const fullUrl = payload.url;
+    if (!fullUrl) {
+      return;
+    }
+    const path = buildPath(fullUrl);
+    if (isBlocked(path)) {
+      return;
     }
 
-    const responseText = normalizePayload(payload.responseBody);
-    const responseLimited = limitText(responseText || "");
-    if (responseLimited.text !== null && responseLimited.text !== "") {
-      const responseParsed = responseLimited.truncated
-        ? { type: "TEXT", value: responseLimited.text }
-        : parsePayload(responseLimited.text);
-      snapshot.responseBodyType = responseParsed.type;
-      snapshot.responseBody = responseParsed.value;
+    const snapshot = {
+      id: crypto.randomUUID(),
+      ts: payload.ts || Date.now(),
+      envType,
+      method: payload.method,
+      fullUrl,
+      path,
+      status: payload.status
+    };
 
-      if (responseParsed.type === "JSON") {
-        const traceId = responseParsed.value?.extraData?.traceID;
-        if (traceId) {
-          snapshot.traceId = traceId;
+    if (envType === "ADMIN") {
+      const requestText = normalizePayload(payload.requestBody);
+      const requestLimited = limitText(requestText || "");
+      if (requestLimited.text !== null && requestLimited.text !== "") {
+        const requestParsed = requestLimited.truncated
+          ? { type: "TEXT", value: requestLimited.text }
+          : parsePayload(requestLimited.text);
+        snapshot.requestPayloadType = requestParsed.type;
+        snapshot.requestPayload = requestParsed.value;
+      }
+
+      const responseText = normalizePayload(payload.responseBody);
+      const responseLimited = limitText(responseText || "");
+      if (responseLimited.text !== null && responseLimited.text !== "") {
+        const responseParsed = responseLimited.truncated
+          ? { type: "TEXT", value: responseLimited.text }
+          : parsePayload(responseLimited.text);
+        snapshot.responseBodyType = responseParsed.type;
+        snapshot.responseBody = responseParsed.value;
+
+        if (responseParsed.type === "JSON") {
+          const traceId = responseParsed.value?.extraData?.traceID;
+          if (traceId) {
+            snapshot.traceId = traceId;
+          }
         }
       }
     }
-  }
 
-  safeSendMessage({
-    type: "RFS_SNAPSHOT",
-    snapshot,
-    maxItems: settings.maxItems
-  });
+    safeSendMessage({
+      type: "RFS_SNAPSHOT",
+      snapshot,
+      maxItems: settings.maxItems
+    });
+  } catch (error) {
+    if (String(error).includes("Extension context invalidated")) {
+      extensionAlive = false;
+    }
+  }
 }
 
 function handleTraceMessage(payload) {
-  if (!settings.enabled) {
-    return;
+  try {
+    if (!settings.enabled) {
+      return;
+    }
+    if (envType !== "H5") {
+      return;
+    }
+    if (!payload?.traceId) {
+      return;
+    }
+    safeSendMessage({
+      type: "RFS_TRACE",
+      traceId: payload.traceId,
+      ts: payload.ts || Date.now(),
+      traceBindWindowSec: settings.traceBindWindowSec,
+      maxItems: settings.maxItems
+    });
+  } catch (error) {
+    if (String(error).includes("Extension context invalidated")) {
+      extensionAlive = false;
+    }
   }
-  if (envType !== "H5") {
-    return;
-  }
-  if (!payload?.traceId) {
-    return;
-  }
-  safeSendMessage({
-    type: "RFS_TRACE",
-    traceId: payload.traceId,
-    ts: payload.ts || Date.now(),
-    traceBindWindowSec: settings.traceBindWindowSec,
-    maxItems: settings.maxItems
-  });
 }
 
 injectPageHook();
 loadSettings();
 
-chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== "sync") {
-    return;
+if (isExtensionAvailable()) {
+  try {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== "sync") {
+        return;
+      }
+      for (const [key, change] of Object.entries(changes)) {
+        settings[key] = change.newValue;
+      }
+      postSettingsToPage();
+    });
+  } catch (error) {
+    extensionAlive = false;
   }
-  for (const [key, change] of Object.entries(changes)) {
-    settings[key] = change.newValue;
-  }
-  postSettingsToPage();
-});
+}
 
 window.addEventListener("message", (event) => {
   if (event.source !== window) {
