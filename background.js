@@ -48,13 +48,19 @@ const DEFAULT_SETTINGS = {
   ]
 };
 
-const snapshotsByTab = new Map();
+function getStorageKey(tabId) {
+  return `rfs_snapshots_${tabId}`;
+}
 
-function getTabState(tabId) {
-  if (!snapshotsByTab.has(tabId)) {
-    snapshotsByTab.set(tabId, { snapshots: [] });
-  }
-  return snapshotsByTab.get(tabId);
+async function readSnapshots(tabId) {
+  const key = getStorageKey(tabId);
+  const result = await chrome.storage.session.get({ [key]: [] });
+  return result[key] || [];
+}
+
+async function writeSnapshots(tabId, snapshots) {
+  const key = getStorageKey(tabId);
+  await chrome.storage.session.set({ [key]: snapshots });
 }
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -72,7 +78,8 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  snapshotsByTab.delete(tabId);
+  const key = getStorageKey(tabId);
+  chrome.storage.session.remove(key);
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -86,55 +93,65 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "RFS_SNAPSHOT") {
-    const state = getTabState(tabId);
-    state.snapshots.push(message.snapshot);
-    const maxItems = Number(message.maxItems) || DEFAULT_SETTINGS.maxItems;
-    if (state.snapshots.length > maxItems) {
-      state.snapshots.splice(0, state.snapshots.length - maxItems);
-    }
+    (async () => {
+      const snapshots = await readSnapshots(tabId);
+      snapshots.push(message.snapshot);
+      const maxItems = Number(message.maxItems) || DEFAULT_SETTINGS.maxItems;
+      if (snapshots.length > maxItems) {
+        snapshots.splice(0, snapshots.length - maxItems);
+      }
+      await writeSnapshots(tabId, snapshots);
+    })();
     return;
   }
 
   if (message.type === "RFS_TRACE") {
-    const state = getTabState(tabId);
-    const now = message.ts || Date.now();
-    const windowMs = (Number(message.traceBindWindowSec) || DEFAULT_SETTINGS.traceBindWindowSec) * 1000;
-    let bound = false;
+    (async () => {
+      const snapshots = await readSnapshots(tabId);
+      const now = message.ts || Date.now();
+      const windowMs =
+        (Number(message.traceBindWindowSec) || DEFAULT_SETTINGS.traceBindWindowSec) * 1000;
+      let bound = false;
 
-    for (let i = state.snapshots.length - 1; i >= 0; i -= 1) {
-      const snapshot = state.snapshots[i];
-      if (snapshot.envType !== "H5") {
-        continue;
+      for (let i = snapshots.length - 1; i >= 0; i -= 1) {
+        const snapshot = snapshots[i];
+        if (snapshot.envType !== "H5") {
+          continue;
+        }
+        if (snapshot.ts && snapshot.ts >= now - windowMs) {
+          snapshot.traceId = snapshot.traceId || message.traceId;
+          bound = true;
+          break;
+        }
+        if (snapshot.ts && snapshot.ts < now - windowMs) {
+          break;
+        }
       }
-      if (snapshot.ts && snapshot.ts >= now - windowMs) {
-        snapshot.traceId = snapshot.traceId || message.traceId;
-        bound = true;
-        break;
-      }
-      if (snapshot.ts && snapshot.ts < now - windowMs) {
-        break;
-      }
-    }
 
-    if (!bound) {
-      const traceOnly = {
-        id: crypto.randomUUID(),
-        ts: now,
-        envType: "TRACE_ONLY",
-        path: "(trace only)",
-        traceId: message.traceId
-      };
-      state.snapshots.push(traceOnly);
-      const maxItems = Number(message.maxItems) || DEFAULT_SETTINGS.maxItems;
-      if (state.snapshots.length > maxItems) {
-        state.snapshots.splice(0, state.snapshots.length - maxItems);
+      if (!bound) {
+        const traceOnly = {
+          id: crypto.randomUUID(),
+          ts: now,
+          envType: "TRACE_ONLY",
+          path: "(trace only)",
+          traceId: message.traceId
+        };
+        snapshots.push(traceOnly);
+        const maxItems = Number(message.maxItems) || DEFAULT_SETTINGS.maxItems;
+        if (snapshots.length > maxItems) {
+          snapshots.splice(0, snapshots.length - maxItems);
+        }
       }
-    }
+      await writeSnapshots(tabId, snapshots);
+    })();
     return;
   }
 
   if (message.type === "RFS_GET_SNAPSHOTS") {
-    const state = getTabState(tabId);
-    sendResponse({ snapshots: state.snapshots });
+    (async () => {
+      const snapshots = await readSnapshots(tabId);
+      sendResponse({ snapshots });
+    })();
+    return true;
   }
 });
