@@ -51,6 +51,19 @@ const DEFAULT_SETTINGS = {
 let settings = { ...DEFAULT_SETTINGS };
 const envType = window.location.hostname.toLowerCase().includes("admin") ? "ADMIN" : "H5";
 
+function safeSendMessage(payload) {
+  if (!chrome?.runtime?.id) {
+    return;
+  }
+  try {
+    chrome.runtime.sendMessage(payload, () => {
+      void chrome.runtime.lastError;
+    });
+  } catch (error) {
+    // Extension context invalidated (e.g., reload/uninstall).
+  }
+}
+
 function postSettingsToPage() {
   window.postMessage(
     {
@@ -212,7 +225,7 @@ function handleRequestMessage(payload) {
     }
   }
 
-  chrome.runtime.sendMessage({
+  safeSendMessage({
     type: "RFS_SNAPSHOT",
     snapshot,
     maxItems: settings.maxItems
@@ -229,7 +242,7 @@ function handleTraceMessage(payload) {
   if (!payload?.traceId) {
     return;
   }
-  chrome.runtime.sendMessage({
+  safeSendMessage({
     type: "RFS_TRACE",
     traceId: payload.traceId,
     ts: payload.ts || Date.now(),
