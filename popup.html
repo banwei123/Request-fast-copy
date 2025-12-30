@@ -9,6 +9,7 @@
   <body>
     <header class="header">
       <div>
+        <p class="eyebrow">Request Fast Copy</p>
         <h1>请求快照复制</h1>
         <p class="subtitle">无需 DevTools，自动抓取最近请求</p>
       </div>
@@ -19,6 +20,10 @@
     </header>
 
     <section class="settings">
+      <div class="section-title">
+        <h2>采集设置</h2>
+        <p>调整采集范围与过滤规则</p>
+      </div>
       <div class="field">
         <label for="max-items">最近条数</label>
         <input id="max-items" type="number" min="10" max="200" />
@@ -39,7 +44,10 @@
 
     <section class="snapshots">
       <div class="snapshots-header">
-        <h2>最近请求</h2>
+        <div>
+          <h2>最近请求</h2>
+          <p>点击条目展开详情</p>
+        </div>
         <button id="refresh" type="button">刷新</button>
       </div>
       <div id="snapshot-list" class="snapshot-list"></div>
