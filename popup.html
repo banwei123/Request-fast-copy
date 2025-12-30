@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Request Fast Copy</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="header">
+      <div>
+        <h1>请求快照复制</h1>
+        <p class="subtitle">无需 DevTools，自动抓取最近请求</p>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="toggle-enabled" />
+        <span>启用</span>
+      </label>
+    </header>
+
+    <section class="settings">
+      <div class="field">
+        <label for="max-items">最近条数</label>
+        <input id="max-items" type="number" min="10" max="200" />
+      </div>
+      <div class="field">
+        <label for="max-body">单条大小 (KB)</label>
+        <input id="max-body" type="number" min="10" max="1024" />
+      </div>
+      <div class="field">
+        <label for="trace-window">trace 绑定窗口 (秒)</label>
+        <input id="trace-window" type="number" min="1" max="60" />
+      </div>
+      <div class="field blocklist">
+        <label for="blocklist">URL 过滤规则 (一行一条)</label>
+        <textarea id="blocklist" rows="6"></textarea>
+      </div>
+    </section>
+
+    <section class="snapshots">
+      <div class="snapshots-header">
+        <h2>最近请求</h2>
+        <button id="refresh" type="button">刷新</button>
+      </div>
+      <div id="snapshot-list" class="snapshot-list"></div>
+    </section>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
